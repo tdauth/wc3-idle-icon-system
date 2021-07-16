@@ -21,7 +21,7 @@ library IdleIconSystem
 			constant boolean IDLE_ICON_SYSTEM_HIDE_ON_ZERO = true
 			
 			constant real IDLE_ICON_SYSTEM_Y = 0.19
-			constant real IDLE_ICON_SYSTEM_START_X = 0.032
+			constant real IDLE_ICON_SYSTEM_START_X = 0.03
 			constant real IDLE_ICON_SYSTEM_WIDTH = 0.04
 	endglobals
 
@@ -57,18 +57,39 @@ library IdleIconSystem
 	function GetTriggerIdleIcon takes nothing returns IdleIcon
 		return LoadIntegerBJ(0, GetHandleId(GetTriggeringTrigger()), whichHashTable)
 	endfunction
+	
+	function interface IdleIconTriggerAction takes IdleIcon idleIcon returns nothing
 
 	private struct IdleIcon
 		private static integer counter = 0
 		
 		private string texture
+		private IdleIconTriggerAction triggerAction
 		private framehandle iconButton
 		private framehandle buttonIconFrame
 		private framehandle chargesTextFrame
 		private framehandle tooltipFrameBackGround
 		private framehandle tooltipFrameText
-		private trigger clickTrigger
+		private trigger clickTrigger = null
 		private integer number
+		
+		/**
+		 * Apparently, when hiding the framehandle the event does not work anymore, so we have to recreate the whole trigger.
+		 */
+		private method updateClickTrigger takes nothing returns nothing
+			if (this.clickTrigger != null) then
+				call FlushChildHashtable(whichHashTable, GetHandleId(this.clickTrigger))
+				call DestroyTrigger(this.clickTrigger)
+				set this.clickTrigger = null
+			endif
+			// create the trigger handling the Button Clicking	
+			set this.clickTrigger = CreateTrigger()
+			// register the Click event
+			call BlzTriggerRegisterFrameEvent(clickTrigger, iconButton, FRAMEEVENT_CONTROL_CLICK)
+			// this happens when the button is clicked
+			call TriggerAddAction(clickTrigger, function thistype.triggerActionClick)
+			call SaveIntegerBJ(this, 0, GetHandleId(clickTrigger), whichHashTable)
+		endmethod
 		
 		private method updateTextures takes nothing returns nothing
 			if (number > 0 or not IDLE_ICON_SYSTEM_HIDE_ON_ZERO) then
@@ -87,6 +108,7 @@ library IdleIconSystem
 		public method setNumber takes integer number returns nothing
 			set this.number = number
 			call this.updateTextures()
+			call this.updateClickTrigger()
 		endmethod
 		
 		public method showForPlayerOnly takes player whichPlayer returns nothing
@@ -97,6 +119,7 @@ library IdleIconSystem
 			if (GetLocalPlayer() == whichPlayer) then
 				call this.updateTextures()
 			endif
+			call this.updateClickTrigger()
 		endmethod
 		
 		public method showForForceOnly takes force whichForce returns nothing
@@ -107,25 +130,30 @@ library IdleIconSystem
 			if (IsPlayerInForce(GetLocalPlayer(), whichForce)) then
 				call this.updateTextures()
 			endif
+			call this.updateClickTrigger()
 		endmethod
 		
 		public method setPos takes real x, real y returns nothing
 			call BlzFrameSetAbsPoint(iconButton, FRAMEPOINT_CENTER, x, y)
 		endmethod
 		
-		public static method create takes string texture, code triggerAction, string tooltip returns thistype
+		private static method triggerActionClick takes nothing returns nothing
+			local thistype this = GetTriggerIdleIcon()
+			call this.triggerAction.execute(this)
+		endmethod
+		
+		public static method create takes string texture, IdleIconTriggerAction triggerAction, string tooltip returns thistype
 			local thistype this = thistype.allocate()
-			
+
 			set thistype.counter = thistype.counter + 1
-			
+
 			set this.texture = texture
-			
+			set this.triggerAction = triggerAction
+
 			// create a new BUTTON inheriting from "ScoreScreenTabButtonTemplate". With the inherit one gains a yellow on mouse hover glowing and blocks right clicks onto the button from reaching the ground below the button
 			set this.iconButton = BlzCreateFrameByType("BUTTON", "MyIconButton" + I2S(this), BlzGetOriginFrame(ORIGIN_FRAME_GAME_UI, 0), "ScoreScreenTabButtonTemplate", 0)
 			// create a BACKDROP for Button which displays the Texture
 			set this.buttonIconFrame = BlzCreateFrameByType("BACKDROP", "MyIconButtonIcon" + I2S(this), iconButton, "", 0)
-			// create the trigger handling the Button Clicking	
-			set this.clickTrigger = CreateTrigger()
 			// buttonIcon will mimic buttonFrame in size and position
 			call BlzFrameSetAllPoints(buttonIconFrame, iconButton)
 			// place the Button to the left center of the Screen
@@ -134,12 +162,9 @@ library IdleIconSystem
 			call BlzFrameSetSize(iconButton, 0.036, 0.036)
 			// set the texture
 			call BlzFrameSetTexture(buttonIconFrame, texture, 0, false)
-			// register the Click event
-			call BlzTriggerRegisterFrameEvent(clickTrigger, iconButton, FRAMEEVENT_CONTROL_CLICK)
-			// this happens when the button is clicked
-			call TriggerAddAction(clickTrigger, triggerAction)
-			call SaveIntegerBJ(this, 0, GetHandleId(clickTrigger), whichHashTable)
-			
+
+			call this.updateClickTrigger()
+
 			// Add charges text
 			// TODO Create as child frame
 			// TODO add black background
@@ -148,8 +173,7 @@ library IdleIconSystem
 			call BlzFrameSetEnable(chargesTextFrame, false)
 			call BlzFrameSetText(chargesTextFrame, "0")
 			call BlzFrameSetScale(chargesTextFrame, 1.0)
-			
-			
+
 			// tooltip
 			set this.tooltipFrameBackGround = BlzCreateFrame("QuestButtonBaseTemplate", BlzGetOriginFrame(ORIGIN_FRAME_GAME_UI, 0), 0, 0)
 			set this.tooltipFrameText = BlzCreateFrameByType("TEXT", "MyScriptDialogButtonTooltip" + I2S(this), tooltipFrameBackGround, "", 0)
@@ -160,7 +184,7 @@ library IdleIconSystem
 			call BlzFrameSetPoint(tooltipFrameText, FRAMEPOINT_BOTTOM, iconButton, FRAMEPOINT_TOP, 0.01, 0.01)
 			call BlzFrameSetEnable(tooltipFrameText, false)
 			call BlzFrameSetText(tooltipFrameText, tooltip)
-		
+
 			return this
 		endmethod
 		
@@ -175,7 +199,7 @@ library IdleIconSystem
 	endstruct
 
 
-	function AddIdleIcon takes string texture, code triggerAction, string tooltip returns IdleIcon
+	function AddIdleIcon takes string texture, IdleIconTriggerAction triggerAction, string tooltip returns IdleIcon
 		return IdleIcon.create(texture, triggerAction, tooltip)
 	endfunction
 	
@@ -230,8 +254,7 @@ library IdleIconSystem
 			//call BJDebugMsg("Clear selected unit")
 		endmethod
 		
-		private static method triggerActionClickButton takes nothing returns nothing
-			local thistype this = thistype(GetTriggerIdleIcon())
+		private static method triggerActionClickButton takes thistype this returns nothing
 			local boolean found = false
 			local boolean flag2 = false
 			local group copy = CreateGroup()
@@ -251,7 +274,7 @@ library IdleIconSystem
 						set found = true
 					elseif (found and next == null) then
 						set next = first
-						//call BJDebugMsg("Set next unit based on the selected")
+						call BJDebugMsg("Set next unit based on the selected")
 					endif
 				endloop
 			endif
@@ -272,18 +295,24 @@ library IdleIconSystem
 			endif
 		endmethod
 		
+		private static method triggerActionClickButtonEx takes nothing returns nothing
+			call thistype.triggerActionClickButton(GetTriggerIdleIcon())
+		endmethod
+		
 		public static method create takes player owner, string texture, boolexpr unitTypeFilter, oskeytype key, string tooltip returns thistype
-			local thistype this = thistype.allocate(texture, function thistype.triggerActionClickButton, tooltip)
+			local thistype this = thistype.allocate(texture, thistype.triggerActionClickButton, tooltip)
 			set this.owner = owner
 			set this.unitTypeFilter = unitTypeFilter
 			call SaveIntegerBJ(this, 0, GetHandleId(this.selectedClearTimer), whichHashTable)
 			call SaveIntegerBJ(this, 0, GetHandleId(this.updateTimer), whichHashTable)
 			
 			set this.hotkeyTrigger = CreateTrigger()
+			
 			if (key != null) then
 				call BlzTriggerRegisterPlayerKeyEvent(this.hotkeyTrigger, this.owner, key, 0, true)
 			endif
-			call TriggerAddAction(this.hotkeyTrigger, function thistype.triggerActionClickButton)
+			
+			call TriggerAddAction(this.hotkeyTrigger, function thistype.triggerActionClickButtonEx)
 			call SaveIntegerBJ(this, 0, GetHandleId(this.hotkeyTrigger), whichHashTable)
 			
 			call TimerStart(updateTimer, IDLE_ICON_SYSTEM_UPDATE_INTERVAL, true, function thistype.timerFunctionUpdate)
